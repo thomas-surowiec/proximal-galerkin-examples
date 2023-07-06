@@ -1,0 +1,7 @@
+name: "examples_for_the_proximal_galerkin_method"
+channels:
+  - conda-forge
+dependencies:
+  - fenics-dolfinx
+  - mfem
+  - python=3.10
