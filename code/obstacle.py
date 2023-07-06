@@ -5,17 +5,17 @@
     finite element method for pointwise bound constraints
 """
 
+import argparse
 from math import pi
 from pathlib import Path
-import argparse
+
 import numpy as np
 import pandas as pd
 import ufl
-from dolfinx.fem.petsc import NonlinearProblem
-from dolfinx.nls.petsc import NewtonSolver
-
 from dolfinx import fem, io, log, mesh
+from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.mesh import CellType, GhostMode
+from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 from petsc4py.PETSc import ScalarType
 from ufl import conditional, div, dot, dx, exp, grad, gt, inner, lt, sin
@@ -264,8 +264,8 @@ def solve_problem(
             break
 
         # Reset Newton solver options
-        NewtonSolver.atol = 1e-3
-        NewtonSolver.rtol = tol_Newton * 1e-4
+        newton_solver.atol = 1e-3
+        newton_solver.rtol = tol_Newton * 1e-4
 
         # Update sol_k with sol_new
         sol_k.x.array[:] = sol.x.array[:]
