@@ -21,6 +21,17 @@ from petsc4py.PETSc import ScalarType
 from ufl import conditional, div, dot, dx, exp, grad, gt, inner, lt, sin
 
 
+def rank_print(string: str, comm: MPI.Comm, rank: int = 0):
+    """Helper function to print on a single rank
+
+    :param string: String to print
+    :param comm: The MPI communicator
+    :param rank: Rank to print on, defaults to 0
+    """
+    if comm.rank == rank:
+        print(string)
+
+
 def allreduce_scalar(form: fem.FormMetaClass, op: MPI.Op = MPI.SUM) -> np.floating:
     """Assemble a scalar form over all processes and perform a global reduction
 
@@ -217,11 +228,11 @@ def solve_problem(
         else:
             step_size_rule == "geometric"
             alpha.value = C * r**k
-        print(f"OUTER LOOP {k + 1} alpha: {alpha.value}")
+        rank_print(f"OUTER LOOP {k + 1} alpha: {alpha.value}", msh.comm)
 
         # Solve problem
         (n, converged) = newton_solver.solve(sol)
-        print(f"Newton steps: {n}   Converged: {converged}")
+        rank_print(f"Newton steps: {n}   Converged: {converged}", msh.comm)
 
         # Check outer loop convergence
         energy = allreduce_scalar(energy_form)
@@ -237,15 +248,15 @@ def solve_problem(
 
         tol_Newton = increment
 
-        print(f"‖u - uₕ‖_H¹: {H1primal_error}" +
-              f"  ‖u - ũₕ‖_L² : {L2latent_error}")
+        rank_print(f"‖u - uₕ‖_H¹: {H1primal_error}" +
+                   f"  ‖u - ũₕ‖_L² : {L2latent_error}", msh.comm)
 
         if increment_k > 0.0:
-            print(f"Increment size: {increment}" +
-                  f"   Ratio: {increment / increment_k}")
+            rank_print(f"Increment size: {increment}" +
+                       f"   Ratio: {increment / increment_k}", msh.comm)
         else:
-            print(f"Increment size: {increment}")
-        print("")
+            rank_print(f"Increment size: {increment}", msh.comm)
+        rank_print("", msh.comm)
 
         energies.append(energy)
         complementarities.append(complementarity)
@@ -294,9 +305,9 @@ def solve_problem(
     df["dofs"] = [np.size(sol_k.x.array[:])] * (k + 1)
     df["Step size rule"] = [step_size_rule] * (k + 1)
     filename = f"./example{example}_polyorder{polynomial_order}_m{m}.csv"
-    print(f"Saving data to: ", str(output_dir / filename))
+    rank_print(f"Saving data to: {str(output_dir / filename)}", msh.comm)
     df.to_csv(output_dir / filename, index=False)
-    print(df)
+    rank_print(df, msh.comm)
 
     # Create output space for bubble function
     V_out = fem.FunctionSpace(
