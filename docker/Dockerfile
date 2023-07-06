@@ -1,7 +1,8 @@
 FROM condaforge/mambaforge
 
-ENV DEBIAN_FRONTEND=noninteractive
-
+ENV DEBIAN_FRONTEND=noninteractive \
+    OMPI_ALLOW_RUN_AS_ROOT=1 \
+    OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 # Install ssh (missing dependency to run conda envs)
 RUN apt-get update && \
     apt-get install -y ssh build-essential
