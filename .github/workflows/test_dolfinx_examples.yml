@@ -1,0 +1,40 @@
+name: Test examples against DOLFINx stable release
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  DEB_PYTHON_INSTALL_LAYOUT: deb_system
+
+jobs: 
+  build-book:
+    runs-on: ubuntu-latest
+    container: ghcr.io/fenics/dolfinx/lab:stable
+    strategy:
+        matrix:
+          example: [1, 2, 3]
+
+    steps:
+
+      - uses: actions/checkout@v3
+  
+      - name: Install dependencies
+        run:
+          python3 -m pip install -r requirements.txt
+
+      - name: Run example
+        run:
+          python3 code/obstacle.py -e ${{ matrix.example }} -p 1 -m 5
+
+    
+      - uses: actions/upload-artifact@v3
+        with:
+          name: example${{ matrix.example }}_polyorder1_m5.csv
+          path: ./output/example${{ matrix.example }}_polyorder1_m5.csv
+          retention-days: 2
+          if-no-files-found: error
