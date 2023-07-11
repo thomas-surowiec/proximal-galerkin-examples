@@ -1,29 +1,37 @@
-//                  Based on MFEM Example 34 - Parallel Version
+//                         MFEM Example 34 - Parallel Version
 //
 //
-// Add file to mfem/examples and compile with: make obstacle
+// Compile with: make ex34p
 //
-// Sample runs: mpirun -np 2 obstacle -o 2
-//              mpirun -np 2 obstacle -o 2 -r 4
-//              mpirun -np 4 obstacle -o 2 -tol 1e-2 -mi 100 -r 4
+// Sample runs: mpirun -np 2 ex34p -o 2
+//              mpirun -np 2 ex34p -o 2 -r 4
 //
 //
 // Description: This example code demonstrates the use of MFEM to solve the
 //              bound-constrained energy minimization problem
 //
-//                      minimize ||∇u||² subject to u ≥ 0 in H¹ .
+//                      minimize ||∇u||² subject to u ≥ ϕ in H¹₀.
 //
-//              After solving to a specified tolerance, the numerical
-//              solution is compared to a closed-form exact solution to
-//              assess accuracy.
+//              This is known as the obstacle problem, and it is a simple
+//              mathematical model for contact mechanics.
+//
+//              In this example, the obstacle ϕ is a half-sphere centered
+//              at the origin of a circular domain Ω. After solving to a
+//              specified tolerance, the numerical solution is compared to
+//              a closed-form exact solution to assess accuracy.
 //
 //              The problem is discretized and solved using the proximal
 //              Galerkin finite element method, introduced by Keith and
 //              Surowiec [1].
 //
+//              This example highlights the ability of MFEM to deliver high-
+//              order solutions to variation inequality problems and
+//              showcases how to set up and solve nonlinear mixed methods.
+//
 //
 // [1] Keith, B. and Surowiec, T. (2023) Proximal Galerkin: A structure-
 //     preserving finite element method for pointwise bound constraints
+//     (in preparation).
 
 
 #include "mfem.hpp"
@@ -33,10 +41,9 @@
 using namespace std;
 using namespace mfem;
 
-double null_obstacle(const Vector &pt);
-double exact_solution_poly(const Vector &pt);
-void exact_solution_gradient_poly(const Vector &pt, Vector &grad);
-double rhs_poly(const Vector &pt);
+double spherical_obstacle(const Vector &pt);
+double exact_solution_obstacle(const Vector &pt);
+void exact_solution_gradient_obstacle(const Vector &pt, Vector &grad);
 
 class LogarithmGridFunctionCoefficient : public Coefficient
 {
@@ -47,7 +54,7 @@ protected:
 
 public:
    LogarithmGridFunctionCoefficient(GridFunction &u_, Coefficient &obst_,
-                                    double min_val_=-1e8)
+                                    double min_val_=-36)
       : u(&u_), obstacle(&obst_), min_val(min_val_) { }
 
    virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip);
@@ -82,10 +89,9 @@ int main(int argc, char *argv[])
    int order = 1;
    bool visualization = true;
    int max_it = 10;
-   double tol = 1e-3;
+   double tol = 1e-5;
    int ref_levels = 3;
-   double alpha0 = 1.0;
-   double r = 1.1;
+   double alpha = 1.0;
 
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
@@ -100,8 +106,8 @@ int main(int argc, char *argv[])
    args.AddOption(&tol, "-tol", "--tol",
                   "Stopping criteria based on the difference between"
                   "successive solution updates");
-   args.AddOption(&alpha0, "-step", "--step",
-                  "Initial step size alpha");
+   args.AddOption(&alpha, "-step", "--step",
+                  "Step size alpha");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
                   "--no-visualization",
                   "Enable or disable GLVis visualization.");
@@ -188,14 +194,7 @@ int main(int argc, char *argv[])
       {
          rr += x(i)*x(i);
       }
-      if (x(0) > 0)
-      {
-         return r0*r0 - rr + pow(x(0),4);
-      }
-      else
-      {
-         return r0*r0 - rr;
-      }
+      return r0*r0 - rr;
    };
    ConstantCoefficient one(1.0);
    ConstantCoefficient zero(0.0);
@@ -215,11 +214,11 @@ int main(int argc, char *argv[])
 
    // 8. Define the function coefficients for the solution and use them to
    //    initialize the initial guess
-   FunctionCoefficient exact_coef(exact_solution_poly);
-   VectorFunctionCoefficient exact_grad_coef(dim,exact_solution_gradient_poly);
+   FunctionCoefficient exact_coef(exact_solution_obstacle);
+   VectorFunctionCoefficient exact_grad_coef(dim,exact_solution_gradient_obstacle);
    FunctionCoefficient IC_coef(IC_func);
-   FunctionCoefficient f(rhs_poly);
-   FunctionCoefficient obstacle(null_obstacle);
+   ConstantCoefficient f(0.0);
+   FunctionCoefficient obstacle(spherical_obstacle);
    u_gf.ProjectCoefficient(IC_coef);
    u_old_gf = u_gf;
 
@@ -251,12 +250,8 @@ int main(int argc, char *argv[])
    int k;
    int total_iterations = 0;
    double increment_u = 0.1;
-   double alpha = alpha0;
-   double H1_error_old = 0.0;
    for (k = 0; k < max_it; k++)
    {
-      alpha = alpha0*pow(r,k);
-
       ParGridFunction u_tmp(&H1fes);
       u_tmp = u_old_gf;
 
@@ -332,25 +327,7 @@ int main(int argc, char *argv[])
          A.SetBlock(1,0,&A10);
          A.SetBlock(0,1,A01);
          A.SetBlock(1,1,&A11);
-         
-         /// UNCOMMENT THE FOLLOWING TO USE A DIRECT SOLVER (best results)
-         // // DIRECT solver
-         // Array2D<HypreParMatrix *> BlockA(2,2);
-         // BlockA(0,0) = &A00;
-         // BlockA(0,1) = A01;
-         // BlockA(1,0) = &A10;
-         // BlockA(1,1) = &A11;
-         // HypreParMatrix * Ah = HypreParMatrixFromBlocks(BlockA);
 
-         // MUMPSSolver mumps;
-         // mumps.SetPrintLevel(0);
-         // mumps.SetMatrixSymType(MUMPSSolver::MatType::UNSYMMETRIC);
-         // mumps.SetOperator(*Ah);
-         // mumps.Mult(trhs,tx);
-         // delete Ah;
-
-         ///// COMMENT THE FOLLOWING WHEN USING A DIRECT SOLVER
-         // Iterative solver
          BlockDiagonalPreconditioner prec(toffsets);
          HypreBoomerAMG P00(A00);
          P00.SetPrintLevel(0);
@@ -408,22 +385,19 @@ int main(int argc, char *argv[])
          mfem::out << "Increment (|| uₕ - uₕ_prvs||) = " << increment_u << endl;
       }
 
-      double H1_error = u_gf.ComputeH1Error(&exact_coef,&exact_grad_coef);
+      u_old_gf = u_gf;
+      psi_old_gf = psi_gf;
 
-      double tmp = abs(H1_error - H1_error_old)/(H1_error + 1e-12);
-      if (tmp < tol || k == max_it-1)
+      if (increment_u < tol || k == max_it-1)
       {
          break;
       }
-      H1_error_old = H1_error;
-      
+
+      double H1_error = u_gf.ComputeH1Error(&exact_coef,&exact_grad_coef);
       if (myid == 0)
       {
          mfem::out << "H1-error  (|| u - uₕᵏ||)       = " << H1_error << endl;
       }
-
-      u_old_gf = u_gf;
-      psi_old_gf = psi_gf;
 
    }
 
@@ -457,13 +431,9 @@ int main(int argc, char *argv[])
       error_gf -= u_alt_gf;
       error_gf *= -1.0;
 
-      psi_old_gf -= psi_gf;
-      psi_old_gf /= alpha;
-
       double L2_error = u_gf.ComputeL2Error(exact_coef);
       double H1_error = u_gf.ComputeH1Error(&exact_coef,&exact_grad_coef);
       double L2_error_alt = u_alt_gf.ComputeL2Error(exact_coef);
-      double lambda_error = psi_old_gf.ComputeL2Error(zero);
 
       if (myid == 0)
       {
@@ -472,22 +442,8 @@ int main(int argc, char *argv[])
          mfem::out << " Final H1-error (|| u - uₕ||)          = " << H1_error << endl;
          mfem::out << " Final L2-error (|| u - ϕ - exp(ψₕ)||) = " << L2_error_alt <<
                    endl;
-         mfem::out << " Final L2-error (|| λ - λₕ ||) = " << lambda_error << endl;
       }
    }
-
-   // END: Save data in the ParaView format
-   ParaViewDataCollection paraview_dc("ex34p", &pmesh);
-   paraview_dc.SetPrefixPath("ParaView");
-   paraview_dc.SetLevelsOfDetail(order);
-   paraview_dc.SetDataFormat(VTKFormat::BINARY);
-   paraview_dc.SetHighOrderOutput(true);
-   paraview_dc.SetCycle(0);
-   paraview_dc.SetTime(0.0);
-   paraview_dc.RegisterField("u",&u_gf);
-   paraview_dc.RegisterField("u_tilde",&u_alt_gf);
-   paraview_dc.RegisterField("lambda",&psi_old_gf);
-   paraview_dc.Save();
 
    return 0;
 }
@@ -510,50 +466,62 @@ double ExponentialGridFunctionCoefficient::Eval(ElementTransformation &T,
    return min(max_val, max(min_val, exp(val) + obstacle->Eval(T, ip)));
 }
 
-double null_obstacle(const Vector &pt)
+double spherical_obstacle(const Vector &pt)
 {
-   return 0.0;
-}
+   double x = pt(0), y = pt(1);
+   double r = sqrt(x*x + y*y);
+   double r0 = 0.5;
+   double beta = 0.9;
 
-double exact_solution_poly(const Vector &pt)
-{
-   double x = pt(0);
+   double b = r0*beta;
+   double tmp = sqrt(r0*r0 - b*b);
+   double B = tmp + b*b/tmp;
+   double C = -b/tmp;
 
-   if (x > 0.0)
+   if (r > b)
    {
-      return pow(x,4);
+      return B + r * C;
    }
    else
    {
-      return 0.0;
+      return sqrt(r0*r0 - r*r);
    }
 }
 
-void exact_solution_gradient_poly(const Vector &pt, Vector &grad)
+double exact_solution_obstacle(const Vector &pt)
 {
-   double x = pt(0);
+   double x = pt(0), y = pt(1);
+   double r = sqrt(x*x + y*y);
+   double r0 = 0.5;
+   double a =  0.348982574111686;
+   double A = -0.340129705945858;
 
-   grad(1) = 0.0;
-   if (x > 0.0)
+   if (r > a)
    {
-      grad(0) =  4.0 * pow(x,3);
+      return A * log(r);
    }
    else
    {
-      grad(0) = 0.0;
+      return sqrt(r0*r0-r*r);
    }
 }
 
-double rhs_poly(const Vector &pt)
+void exact_solution_gradient_obstacle(const Vector &pt, Vector &grad)
 {
-   double x = pt(0);
+   double x = pt(0), y = pt(1);
+   double r = sqrt(x*x + y*y);
+   double r0 = 0.5;
+   double a =  0.348982574111686;
+   double A = -0.340129705945858;
 
-   if (x > 0.0)
+   if (r > a)
    {
-      return -12.0 * pow(x,2);
+      grad(0) =  A * x / (r*r);
+      grad(1) =  A * y / (r*r);
    }
    else
    {
-      return 0.0;
+      grad(0) = - x / sqrt( r0*r0 - r*r );
+      grad(1) = - y / sqrt( r0*r0 - r*r );
    }
 }
