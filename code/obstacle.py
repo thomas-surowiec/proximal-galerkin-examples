@@ -359,15 +359,6 @@ def solve_problem(
     with io.VTXWriter(msh.comm, output_dir / "lambda.bp", [q]) as vtx:
         vtx.write(0.0)
 
-    # Export alternative "Lagrange multiplier"
-    strong_laplace = -div(grad(sol.sub(0))) - f
-    expr = fem.Expression(strong_laplace, W_out.element.interpolation_points())
-    q = fem.Function(W_out)
-    q.interpolate(expr)
-    with io.VTXWriter(msh.comm, output_dir / "laplace.bp", [q]) as vtx:
-        vtx.write(0.0)
-
-
 # -------------------------------------------------------
 if __name__ == "__main__":
     desc = "Run examples from paper"
