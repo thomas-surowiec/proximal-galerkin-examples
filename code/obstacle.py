@@ -380,7 +380,7 @@ if __name__ == "__main__":
         dest="example",
         type=int,
         choices=[1, 2, 3],
-        default=3,
+        default=1,
         help="The example number",
     )
     parser.add_argument(
@@ -397,6 +397,7 @@ if __name__ == "__main__":
         dest="polynomial_order",
         type=int,
         default=1,
+        choices=[1, 2],
         help="Polynomial order of primal space",
     )
     parser.add_argument(
