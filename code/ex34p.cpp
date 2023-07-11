@@ -85,7 +85,7 @@ int main(int argc, char *argv[])
    Hypre::Init();
 
    // 1. Parse command-line options.
-   const char *mesh_file = "../data/disk-nurbs-unit.mesh";
+   const char *mesh_file = "../data/disc-nurbs-unit.mesh";
    int order = 1;
    bool visualization = true;
    int max_it = 10;
