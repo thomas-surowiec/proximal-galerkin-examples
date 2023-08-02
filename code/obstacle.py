@@ -1,8 +1,9 @@
 """
     FEniCSx code to reproduce obstacle problem results in [1].
 
-    [1] B. Keith and T.M. Surowiec (2023) Proximal Galerkin: A structure-preserving
-    finite element method for pointwise bound constraints
+    [1] Keith, B. and Surowiec, T. (2023) Proximal Galerkin: A structure-
+       preserving finite element method for pointwise bound constraints.
+       arXiv:2307.12444 [math.NA]
 """
 
 import argparse

@@ -1,4 +1,4 @@
-//                  Based on MFEM Example 34 - Parallel Version
+//                  Based on MFEM Example 36 - Parallel Version
 //
 //
 // Add file to mfem/examples and compile with: make obstacle
@@ -23,7 +23,8 @@
 //
 //
 // [1] Keith, B. and Surowiec, T. (2023) Proximal Galerkin: A structure-
-//     preserving finite element method for pointwise bound constraints
+//     preserving finite element method for pointwise bound constraints.
+//     arXiv:2307.12444 [math.NA]
 
 
 #include "mfem.hpp"
@@ -78,18 +79,15 @@ int main(int argc, char *argv[])
    Hypre::Init();
 
    // 1. Parse command-line options.
-   const char *mesh_file = "../data/disk-nurbs-unit.mesh";
    int order = 1;
-   bool visualization = true;
    int max_it = 10;
    double tol = 1e-3;
    int ref_levels = 3;
    double alpha0 = 1.0;
    double r = 1.1;
+   bool visualization = true;
 
    OptionsParser args(argc, argv);
-   args.AddOption(&mesh_file, "-m", "--mesh",
-                  "Mesh file to use.");
    args.AddOption(&order, "-o", "--order",
                   "Finite element order (polynomial degree) or -1 for"
                   "isoparametric space.");
@@ -120,18 +118,26 @@ int main(int argc, char *argv[])
    }
 
    // 2. Read the mesh from the given mesh file.
+   const char *mesh_file = "../data/disc-nurbs.mesh";
    Mesh mesh(mesh_file, 1, 1);
    int dim = mesh.Dimension();
 
-   // 3. Refine the mesh to increase the resolution.
+   // 3. Postprocess the mesh.
+   // 3A. Refine the mesh to increase the resolution.
    for (int l = 0; l < ref_levels; l++)
    {
       mesh.UniformRefinement();
    }
 
+   // 3B. Interpolate the geometry after refinement to control geometry error.
+   // NOTE: Minimum second-order interpolation is used to improve the accuracy.
    int curvature_order = max(order,2);
    mesh.SetCurvature(curvature_order);
-   mesh.EnsureNCMesh();
+
+   // 3C. Rescale the domain to a unit circle (radius = 1).
+   GridFunction *nodes = mesh.GetNodes();
+   double scale = 2*sqrt(2);
+   *nodes /= scale;
 
    ParMesh pmesh(MPI_COMM_WORLD, mesh);
    mesh.Clear();
@@ -143,12 +149,16 @@ int main(int argc, char *argv[])
    L2_FECollection L2fec(order-1, dim);
    ParFiniteElementSpace L2fes(&pmesh, &L2fec);
 
+   int num_dofs_H1 = H1fes.GetTrueVSize();
+   MPI_Allreduce(MPI_IN_PLACE, &num_dofs_H1, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+   int num_dofs_L2 = L2fes.GetTrueVSize();
+   MPI_Allreduce(MPI_IN_PLACE, &num_dofs_L2, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
    if (myid == 0)
    {
-      cout << "Number of finite element unknowns: "
-           << H1fes.GetTrueVSize()
-           << " "
-           << L2fes.GetTrueVSize() << endl;
+      cout << "Number of H1 finite element unknowns: "
+           << num_dofs_H1 << endl;
+      cout << "Number of L2 finite element unknowns: "
+           << num_dofs_L2 << endl;
    }
 
    Array<int> offsets(3);
@@ -231,20 +241,10 @@ int main(int argc, char *argv[])
    char vishost[] = "localhost";
    int  visport   = 19916;
    socketstream sol_sock;
-
-   ParGridFunction u_alt_gf(&L2fes);
-   ParGridFunction error_gf(&L2fes);
-
-   ExponentialGridFunctionCoefficient u_alt_cf(psi_gf,obstacle);
-   u_alt_gf.ProjectCoefficient(u_alt_cf);
-
    if (visualization)
    {
       sol_sock.open(vishost,visport);
       sol_sock.precision(8);
-      sol_sock << "parallel " << num_procs << " " << myid << "\n";
-      sol_sock << "solution\n" << pmesh << u_alt_gf <<
-               "window_title 'Discrete solution'" << flush;
    }
 
    // 10. Iterate
@@ -431,7 +431,7 @@ int main(int argc, char *argv[])
    {
       mfem::out << "\n Outer iterations: " << k+1
                 << "\n Total iterations: " << total_iterations
-                << "\n dofs:             " << H1fes.GetTrueVSize() + L2fes.GetTrueVSize()
+                << "\n dofs:             " << num_dofs_H1 + num_dofs_L2
                 << endl;
    }
 
@@ -441,28 +441,26 @@ int main(int argc, char *argv[])
       socketstream err_sock(vishost, visport);
       err_sock.precision(8);
 
-      ParGridFunction error(&H1fes);
-      error = 0.0;
-      error.ProjectCoefficient(exact_coef);
-      error -= u_gf;
+      ParGridFunction error_gf(&H1fes);
+      error_gf.ProjectCoefficient(exact_coef);
+      error_gf -= u_gf;
 
       err_sock << "parallel " << num_procs << " " << myid << "\n";
-      err_sock << "solution\n" << pmesh << error << "window_title 'Error'"  << flush;
+      err_sock << "solution\n" << pmesh << error_gf << "window_title 'Error'"  <<
+               flush;
    }
 
+   ParGridFunction u_alt_gf(&L2fes);
    {
+      double L2_error = u_gf.ComputeL2Error(exact_coef);
+      double H1_error = u_gf.ComputeH1Error(&exact_coef,&exact_grad_coef);
+
+      ExponentialGridFunctionCoefficient u_alt_cf(psi_gf,obstacle);
       u_alt_gf.ProjectCoefficient(u_alt_cf);
-      error_gf = 0.0;
-      error_gf.ProjectCoefficient(exact_coef);
-      error_gf -= u_alt_gf;
-      error_gf *= -1.0;
+      double L2_error_alt = u_alt_gf.ComputeL2Error(exact_coef);
 
       psi_old_gf -= psi_gf;
       psi_old_gf /= alpha;
-
-      double L2_error = u_gf.ComputeL2Error(exact_coef);
-      double H1_error = u_gf.ComputeH1Error(&exact_coef,&exact_grad_coef);
-      double L2_error_alt = u_alt_gf.ComputeL2Error(exact_coef);
       double lambda_error = psi_old_gf.ComputeL2Error(zero);
 
       if (myid == 0)
