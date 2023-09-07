@@ -19,7 +19,7 @@ from dolfinx.mesh import CellType, GhostMode
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 from petsc4py.PETSc import ScalarType
-from ufl import conditional, div, dot, dx, exp, grad, gt, inner, lt, sin
+from ufl import conditional, div, dot, dx, exp, grad, gt, inner, lt, sin, cos, tanh
 
 
 def rank_print(string: str, comm: MPI.Comm, rank: int = 0):
@@ -48,6 +48,7 @@ def solve_problem(
     polynomial_order: int,
     maximum_number_of_outer_loop_iterations: int,
     alpha_value: float,
+    epsilon: float,
     tol_exit: float,
 ):
     """
@@ -59,7 +60,7 @@ def solve_problem(
     num_cells_per_direction = 2**m
     msh = mesh.create_rectangle(
         comm=MPI.COMM_WORLD,
-        points=((-1.0, -1.0), (1.0, 1.0)),
+        points=((0.0, 0.0), (1.0, 1.0)),
         n=(num_cells_per_direction, num_cells_per_direction),
         cell_type=CellType.triangle,
         ghost_mode=GhostMode.shared_facet,
@@ -73,13 +74,16 @@ def solve_problem(
     # Define functions and parameters
     alpha = fem.Constant(msh, ScalarType(1))
     alpha.value = alpha_value
+    beta = fem.Constant(msh, ScalarType((1,0)))
     x = ufl.SpatialCoordinate(msh)
 
-    # TODO
-    f = conditional(gt(x[0], 0.0), -12 * x[0] ** 2, fem.Constant(msh, 0.0))
-    u_exact = conditional(gt(x[0], 0.0), x[0] ** 4, fem.Constant(msh, 0.0))
-    lambda_exact = fem.Constant(msh, 0.0)
-
+    f = fem.Constant(msh, 0.0)
+    lambda1 = np.pi**2 * epsilon
+    r1 =  (1.0 + np.sqrt(1.0 + 4.0 * epsilon * lambda1)) / (2*epsilon)
+    r2 =  (1.0 - np.sqrt(1.0 + 4.0 * epsilon * lambda1)) / (2*epsilon)
+    denom = 2.0 * ( np.exp(-r2) - np.exp(-r1) )
+    u_exact = ( exp( r2 * (x[0] - 1.0) ) - exp( r1 * (x[0] - 1.0) ) ) \
+              * cos(np.pi * x[1] ) / denom + 0.5
 
     # Define BCs
     # TODO
@@ -107,10 +111,12 @@ def solve_problem(
     F = (
         alpha * inner(grad(u), grad(v)) * dx
         + psi * v * dx
-        + u * w * dx
-        - exp(psi) * w * dx
+        - (alpha - epsilon) * inner(grad(u_k), grad(v)) * dx
+        + alpha * dot(beta,grad(u_k)) * v * dx
         - alpha * f * v * dx
         - psi_k * v * dx
+        + u * w * dx
+        - (tanh(psi/2) + 1)/2 * w * dx
     )
     J = ufl.derivative(F, sol)
 
@@ -132,9 +138,9 @@ def solve_problem(
         dx + (u - u_exact) ** 2 * dx
     )
     L2primal_error_form = fem.form((u - u_exact) ** 2 * dx)
-    L2latent_error_form = fem.form((exp(psi) - u_exact) ** 2 * dx)
+    L2latent_error_form = fem.form(((tanh(psi/2) + 1)/2 - u_exact) ** 2 * dx)
 
-    # Proximal point outer loop
+    # Proximal residual outer loop
     n = 0
     increment_k = 0.0
     sol.x.array[:] = 0.0
@@ -184,8 +190,8 @@ def solve_problem(
             break
 
         # Reset Newton solver options
-        newton_solver.atol = 1e-3
-        newton_solver.rtol = tol_Newton * 1e-4
+        newton_solver.atol = 1e-5
+        newton_solver.rtol = tol_Newton * 1e-5
 
         # Update sol_k with sol_new
         sol_k.x.array[:] = sol.x.array[:]
@@ -234,15 +240,8 @@ def solve_problem(
     with io.VTXWriter(msh.comm, output_dir / "u_exact.bp", [q]) as vtx:
         vtx.write(0.0)
 
-    # Export interpolant of Lagrange multiplier λ
-    W_out = fem.FunctionSpace(msh, ("DG", max(1, polynomial_order - 1)))
-    q = fem.Function(W_out)
-    expr = fem.Expression(lambda_exact, W_out.element.interpolation_points())
-    q.interpolate(expr)
-    with io.VTXWriter(msh.comm, output_dir / "lambda_exact.bp", [q]) as vtx:
-        vtx.write(0.0)
-
     # Export latent solution variable
+    W_out = fem.FunctionSpace(msh, ("DG", max(1, polynomial_order - 1)))
     q = fem.Function(W_out)
     expr = fem.Expression(sol.sub(1), W_out.element.interpolation_points())
     q.interpolate(expr)
@@ -250,34 +249,18 @@ def solve_problem(
         vtx.write(0.0)
 
     # Export feasible discrete solution
-    exp_psi = exp(sol.sub(1))
+    exp_psi = (tanh(sol.sub(1)/2) + 1)/2
     expr = fem.Expression(exp_psi, W_out.element.interpolation_points())
     q.interpolate(expr)
     with io.VTXWriter(msh.comm, output_dir / "tilde_u_interp.bp", [q]) as vtx:
         vtx.write(0.0)
 
-    # Export "Lagrange multiplier"
-    lam = (sol_k.sub(1) - sol.sub(1)) / alpha.value
-    expr = fem.Expression(lam, W_out.element.interpolation_points())
-    q.interpolate(expr)
-    with io.VTXWriter(msh.comm, output_dir / "lambda.bp", [q]) as vtx:
-        vtx.write(0.0)
-
 # -------------------------------------------------------
 # TODO
 if __name__ == "__main__":
-    desc = "Run examples from paper"
+    desc = "Run advection-diffusion example from paper"
     parser = argparse.ArgumentParser(
         description=desc, formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument(
-        "--example",
-        "-e",
-        dest="example",
-        type=int,
-        choices=[1, 2, 3],
-        default=1,
-        help="The example number",
     )
     parser.add_argument(
         "--mesh-density",
@@ -293,7 +276,7 @@ if __name__ == "__main__":
         dest="polynomial_order",
         type=int,
         default=1,
-        choices=[1, 2],
+        choices=[1, 2, 3],
         help="Polynomial order of primal space",
     )
     parser.add_argument(
@@ -305,27 +288,35 @@ if __name__ == "__main__":
         help="Maximum number of outer loop iterations",
     )
     parser.add_argument(
-        "--alpha-max",
+        "--alpha",
         "-a",
-        dest="alpha_max",
+        dest="alpha",
         type=float,
-        default=10e10,
-        help="Maximum alpha",
+        default=1,
+        help="Step size",
+    )
+    parser.add_argument(
+        "--epsilon",
+        "-eps",
+        dest="epsilon",
+        type=float,
+        default=1e-2,
+        help="Diffusion parameter",
     )
     parser.add_argument(
         "--tol",
         "-t",
         dest="tol_exit",
         type=float,
-        default=1e-10,
+        default=1e-4,
         help="Tolerance for exiting Newton iteration",
     )
     args = parser.parse_args()
     solve_problem(
-        args.example,
         args.m,
         args.polynomial_order,
         args.maximum_number_of_outer_loop_iterations,
-        args.alpha_max,
+        args.alpha,
+        args.epsilon,
         args.tol_exit,
     )
