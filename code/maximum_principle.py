@@ -54,12 +54,12 @@ def create_mesh(m: int):
     return msh
 
 def exact_solution(x, epsilon):
-    lambda1 = np.pi**2 * epsilon
+    lambda1 = pi**2 * epsilon
     r1 =  (1.0 + np.sqrt(1.0 + 4.0 * epsilon * lambda1)) / (2*epsilon)
     r2 =  (1.0 - np.sqrt(1.0 + 4.0 * epsilon * lambda1)) / (2*epsilon)
     denom = 2.0 * ( np.exp(-r2) - np.exp(-r1) )
     u_exact = ( exp( r2 * (x[0] - 1.0) ) - exp( r1 * (x[0] - 1.0) ) ) \
-              * cos(np.pi * x[1] ) / denom + 0.5
+              * cos(pi * x[1] ) / denom + 0.5
     return u_exact
 
 def BG_solve(
@@ -131,6 +131,7 @@ def PG_solve(
     alpha_value: float,
     epsilon: float,
     tol_exit: float,
+    GLL: bool
 ):
     """
     Solve the Eriksson–Johnson model problem with Proximal Galerkin
@@ -178,7 +179,6 @@ def PG_solve(
         lnit_u_exact, V.sub(1).element.interpolation_points()))
     bc_1 = fem.dirichletbc(value=psi_bc, dofs=dofs_1, V=V.sub(1))
 
-
     # Define solution variables
     sol = fem.Function(V)
     sol_k = fem.Function(V)
@@ -187,8 +187,10 @@ def PG_solve(
     u_k, psi_k = ufl.split(sol_k)
 
     # Define non-linear residual
-    dx_GLL = dx
-    # dx_GLL = ufl.Measure("dx", metadata = {"quadrature_rule": "GLL"})
+    if GLL:
+        dx_GLL = ufl.Measure("dx", metadata = {"quadrature_rule": "GLL"})
+    else:
+        dx_GLL = dx
     (v, w) = ufl.TestFunctions(V)
     rho = epsilon
     F = (
@@ -392,6 +394,13 @@ if __name__ == "__main__":
         default=1e-5,
         help="Tolerance for exiting Newton iteration",
     )
+    parser.add_argument(
+        "--GLL-quadrature-rule",
+        "-GLL",
+        dest="GLL",
+        action="store_true",
+        help="Use GLL quadrature",
+    )
     args = parser.parse_args()
     PG_solve(
         args.m,
@@ -400,4 +409,5 @@ if __name__ == "__main__":
         args.alpha,
         args.epsilon,
         args.tol_exit,
+        args.GLL
     )
