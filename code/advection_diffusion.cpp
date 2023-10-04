@@ -5,8 +5,10 @@
 //       preserving finite element method for pointwise bound constraints.
 //       arXiv:2307.12444 [math.NA]
 //
-//  Note: This requires MFEM to be build with UMFPACK
+//  To build, install MFEM and place this file in the `/mfem/examples` directory. Then compile with 
+//  the command `make advection_diffusion`.
 //
+//  Note: This file requires MFEM to be built with UMFPACK
 //
 
 #include "mfem.hpp"
@@ -95,9 +97,10 @@ int main(int argc, char *argv[])
    // 1. Parse command-line options.
    int order = 1;
    int ref_levels = 3;
-   int max_it = 5;
+   int max_it = 100;
    double tol = 1e-4;
-   double alpha = 0.1;
+   double alpha = 0.01;
+   double rho = 1.0;
 
    OptionsParser args(argc, argv);
    args.AddOption(&order, "-o", "--order",
@@ -110,7 +113,9 @@ int main(int argc, char *argv[])
                   "Stopping criteria based on the difference between"
                   "successive solution updates");
    args.AddOption(&alpha, "-step", "--step",
-                  "Initial step size alpha");
+                  "Bregman step size alpha");
+   args.AddOption(&rho, "-rho", "--rho",
+                  "Proximal step size rho");
    args.Parse();
    if (!args.Good())
    {
@@ -139,7 +144,7 @@ int main(int argc, char *argv[])
 
    cout << "Number of H1 finite element unknowns: "
         << H1fes.GetTrueVSize() 
-        << "Number of L2 finite element unknowns: "
+        << "\nNumber of L2 finite element unknowns: "
         << L2fes.GetTrueVSize() << endl;
 
    Array<int> offsets(3);
@@ -152,8 +157,8 @@ int main(int argc, char *argv[])
    x = 0.0; rhs = 0.0;
 
    GridFunction u_gf, delta_psi_gf;
-   u_gf.MakeRef(&H1fes,x.GetBlock(0));
-   delta_psi_gf.MakeRef(&L2fes,x.GetBlock(1));
+   u_gf.MakeRef(&H1fes,x,offsets[0]);
+   delta_psi_gf.MakeRef(&L2fes,x,offsets[1]);
    delta_psi_gf = 0.0;
 
    // 5. Determine the list of true (i.e., conforming) essential boundary dofs.
@@ -222,26 +227,27 @@ int main(int argc, char *argv[])
    int  visport   = 19916;
    socketstream sol_sock(vishost, visport);
    sol_sock.precision(8);
+   socketstream sol_sock2(vishost, visport);
+   sol_sock2.precision(8);
 
    // 9. Initialize the slack variable ψₕ = lnit(uₕ)
    ExpitGridFunctionCoefficient expit_psi(psi_gf);
    GridFunction u_alt_gf(&L2fes);
    u_alt_gf.ProjectCoefficient(expit_psi);
-   sol_sock << "solution\n" << mesh << u_gf << "window_title 'Discrete solution'" << flush;
+   sol_sock << "solution\n" << mesh << u_gf <<
+               "keys a\n" <<
+               "window_title 'Discrete solution u_h'" << flush;
 
    // 10. Save data
    mfem::ParaViewDataCollection paraview_dc("Advection_diffusion", &mesh);
    paraview_dc.SetPrefixPath("ParaView");
    paraview_dc.SetLevelsOfDetail(order);
-   paraview_dc.SetCycle(0);
    paraview_dc.SetDataFormat(VTKFormat::BINARY);
    paraview_dc.SetHighOrderOutput(true);
-   paraview_dc.SetTime(0.0); // set the time
    paraview_dc.RegisterField("u",&u_gf);
    paraview_dc.RegisterField("tilde_u",&u_alt_gf);
-
-   paraview_dc.SetCycle(1);
-   paraview_dc.SetTime((double)1);
+   paraview_dc.SetCycle(0);
+   paraview_dc.SetTime(0.0);
    paraview_dc.Save();
 
    // 11. Iterate
@@ -271,12 +277,14 @@ int main(int argc, char *argv[])
          GridFunctionCoefficient u_old_cf(&u_old_gf);
          GradientGridFunctionCoefficient grad_u_old(&u_old_gf);
          InnerProductCoefficient beta_grad_u_old(beta_coeff, grad_u_old);
-         SumCoefficient alpha_pde_residual(beta_grad_u_old, f, -alpha, alpha);
+         ScalarVectorProductCoefficient alpha_pde_residual1(alpha*(1.0/rho - eps), grad_u_old);
+         SumCoefficient alpha_pde_residual2(beta_grad_u_old, f, -alpha, alpha);
          GridFunctionCoefficient psi_cf(&psi_gf);
          GridFunctionCoefficient psi_old_cf(&psi_old_gf);
          SumCoefficient psi_old_minus_psi(psi_old_cf, psi_cf, 1.0, -1.0);
 
-         b0.AddDomainIntegrator(new DomainLFIntegrator(alpha_pde_residual));
+         b0.AddDomainIntegrator(new DomainLFGradIntegrator(alpha_pde_residual1));
+         b0.AddDomainIntegrator(new DomainLFIntegrator(alpha_pde_residual2));
          b0.AddDomainIntegrator(new DomainLFIntegrator(psi_old_minus_psi));
          b0.Assemble();
 
@@ -284,8 +292,8 @@ int main(int argc, char *argv[])
          b1.Assemble();
 
          BilinearForm a00(&H1fes);
-         ProductCoefficient alpha_eps_cf(alpha, eps_coeff);
-         a00.AddDomainIntegrator(new DiffusionIntegrator(alpha_eps_cf));
+         ConstantCoefficient alpha_rho_cf(alpha/rho);
+         a00.AddDomainIntegrator(new DiffusionIntegrator(alpha_rho_cf));
          a00.Assemble();
          a00.EliminateEssentialBC(ess_bdr,x.GetBlock(0),rhs.GetBlock(0),mfem::Operator::DIAG_ONE);
          a00.Finalize();
@@ -322,15 +330,18 @@ int main(int argc, char *argv[])
          u_tmp = u_gf;
 
          u_alt_gf.ProjectCoefficient(expit_psi);
-         sol_sock << "solution\n" << mesh << u_alt_gf << "window_title 'Discrete solution'" << flush;
+         sol_sock2 << "solution\n" << mesh << u_alt_gf <<
+                      "keys a\n" <<
+                      "window_title 'Discrete solution \\tilde{u}_h'" << flush;
 
-         double factor = 1.0;
+
+         double factor = 0.5;
          delta_psi_gf *= factor;
          psi_gf += delta_psi_gf;
 
          mfem::out << "Newton_update_size = " << Newton_update_size << endl;
 
-         if (Newton_update_size < increment_u/10.0)
+         if (Newton_update_size < increment_u/100.0)
          {
             break;
          }

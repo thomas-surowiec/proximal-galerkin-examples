@@ -129,6 +129,7 @@ def PG_solve(
     polynomial_order: int,
     maximum_number_of_outer_loop_iterations: int,
     alpha_value: float,
+    rho_value: float,
     epsilon: float,
     tol_exit: float,
     GLL: bool
@@ -149,6 +150,8 @@ def PG_solve(
     # Define functions and parameters
     alpha = fem.Constant(msh, ScalarType(1))
     alpha.value = alpha_value
+    rho = fem.Constant(msh, ScalarType(1))
+    rho.value = rho_value
     beta = fem.Constant(msh, ScalarType((1,0)))
     x = ufl.SpatialCoordinate(msh)
 
@@ -188,11 +191,11 @@ def PG_solve(
 
     # Define non-linear residual
     if GLL:
-        dx_GLL = ufl.Measure("dx", metadata = {"quadrature_rule": "GLL"})
+        print("\nUsing GLL quadrature")
+        dx_GLL = ufl.Measure("dx", metadata = {"quadrature_rule": "GLL","quadrature_degree": polynomial_order})
     else:
         dx_GLL = dx
     (v, w) = ufl.TestFunctions(V)
-    rho = epsilon
     F = (
         alpha/rho * inner(grad(u), grad(v)) * dx
         + psi * v * dx_GLL
@@ -339,7 +342,6 @@ def PG_solve(
         vtx.write(0.0)
 
 # -------------------------------------------------------
-# TODO
 if __name__ == "__main__":
     desc = "Run advection-diffusion example from paper"
     parser = argparse.ArgumentParser(
@@ -375,8 +377,16 @@ if __name__ == "__main__":
         "-a",
         dest="alpha",
         type=float,
-        default=1,
+        default=0.1,
         help="Step size",
+    )
+    parser.add_argument(
+        "--rho",
+        "-r",
+        dest="rho",
+        type=float,
+        default=0.1,
+        help="Second step size",
     )
     parser.add_argument(
         "--epsilon",
@@ -391,7 +401,7 @@ if __name__ == "__main__":
         "-t",
         dest="tol_exit",
         type=float,
-        default=1e-5,
+        default=1e-4,
         help="Tolerance for exiting Newton iteration",
     )
     parser.add_argument(
@@ -407,6 +417,7 @@ if __name__ == "__main__":
         args.polynomial_order,
         args.maximum_number_of_outer_loop_iterations,
         args.alpha,
+        args.rho,
         args.epsilon,
         args.tol_exit,
         args.GLL
