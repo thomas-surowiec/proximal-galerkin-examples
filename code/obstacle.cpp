@@ -80,17 +80,16 @@ int main(int argc, char *argv[])
 
    // 1. Parse command-line options.
    int order = 1;
+   int ref_levels = 3;
    int max_it = 10;
    double tol = 1e-3;
-   int ref_levels = 3;
    double alpha0 = 1.0;
    double r = 1.1;
    bool visualization = true;
 
    OptionsParser args(argc, argv);
    args.AddOption(&order, "-o", "--order",
-                  "Finite element order (polynomial degree) or -1 for"
-                  "isoparametric space.");
+                  "Finite element order (polynomial degree).");
    args.AddOption(&ref_levels, "-r", "--refs",
                   "Number of h-refinements.");
    args.AddOption(&max_it, "-mi", "--max-it",
@@ -233,7 +232,7 @@ int main(int argc, char *argv[])
    u_gf.ProjectCoefficient(IC_coef);
    u_old_gf = u_gf;
 
-   // 9. Initialize the slack variable ψₕ = exp(uₕ)
+   // 9. Initialize the slack variable ψₕ = ln(uₕ)
    LogarithmGridFunctionCoefficient ln_u(u_gf, obstacle);
    psi_gf.ProjectCoefficient(ln_u);
    psi_old_gf = psi_gf;

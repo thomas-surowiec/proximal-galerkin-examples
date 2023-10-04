@@ -1,5 +1,5 @@
 """
-    FEniCSx code to reproduce advection-diffusion results in [1].
+    FEniCSx implementation of the proximal Galerkin method for advection-diffusion introduced in [1].
 
     [1] Keith, B. and Surowiec, T. (2023) Proximal Galerkin: A structure-
        preserving finite element method for pointwise bound constraints.
@@ -351,7 +351,7 @@ if __name__ == "__main__":
         dest="m",
         type=int,
         default=4,
-        help="MESH DENSITY (m = 2 corresponds to h_∞)",
+        help="MESH DENSITY",
     )
     parser.add_argument(
         "--polynomial_order",
@@ -360,7 +360,7 @@ if __name__ == "__main__":
         type=int,
         default=1,
         choices=[1, 2, 3],
-        help="Polynomial order of primal space",
+        help="Polynomial order",
     )
     parser.add_argument(
         "--max-iter",
