@@ -20,7 +20,6 @@ using namespace mfem;
 
 
 double eps = 1e-2;
-double Ramp_BC(const Vector &pt);
 double EJ_exact_solution(const Vector &pt);
 
 double lnit(double x)
@@ -404,37 +403,6 @@ double dExpitdxGridFunctionCoefficient::Eval(ElementTransformation &T,
 
    double val = u->GetValue(T, ip);
    return min(max_val, max(min_val, dexpitdx(val)));
-}
-
-double Ramp_BC(const Vector &pt)
-{
-   double x = pt(0), y = pt(1);
-   double tol = 1e-10;
-   double eps = 0.05;
-
-   if (  (abs(y) < tol && x >= 0.2)
-      || (abs(x-1.0) < tol)
-      || (abs(y-1.0) < tol) )
-   {
-      return 0.0;
-   }
-   else if (  (abs(x) < tol && y <= 1.0 - eps)
-           || (abs(y) < tol && x <= 0.2 - eps) )
-   {
-      return 1.0;
-   }
-   else if (x >= (0.2 - eps) && abs(y) < tol)
-   {
-      return (0.2 - x)/eps;
-   }
-   else if (y >= (1.0 - eps) && abs(x) < tol)
-   {
-      return  (1.0 - y)/eps;
-   }
-   else
-   {
-      return 0.5;
-   }
 }
 
 double EJ_exact_solution(const Vector &pt)
