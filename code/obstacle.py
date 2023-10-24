@@ -188,7 +188,7 @@ def solve_problem(
     H1increment_form = fem.form(
         inner(grad(u - u_k), grad(u - u_k)) * dx + (u - u_k) ** 2 * dx
     )
-    L2increment_form = fem.form((exp(u) - exp(u_k)) ** 2 * dx)
+    L2increment_form = fem.form((exp(psi) - exp(psi_k)) ** 2 * dx)
     H1primal_error_form = fem.form(
         inner(grad(u - u_exact), grad(u - u_exact)) *
         dx + (u - u_exact) ** 2 * dx
@@ -350,7 +350,7 @@ def solve_problem(
     exp_psi = exp(sol.sub(1))
     expr = fem.Expression(exp_psi, W_out.element.interpolation_points())
     q.interpolate(expr)
-    with io.VTXWriter(msh.comm, output_dir / "tilde_u_interp.bp", [q]) as vtx:
+    with io.VTXWriter(msh.comm, output_dir / "tilde_u.bp", [q]) as vtx:
         vtx.write(0.0)
 
     # Export "Lagrange multiplier"
