@@ -200,7 +200,6 @@ int main(int argc, char *argv[])
          rr += x(i)*x(i);
       }
       return r0*r0 - rr;
-      // return 2.0*(r0*r0 - rr);
    };
    ConstantCoefficient one(1.0);
    ConstantCoefficient zero(0.0);
@@ -230,7 +229,6 @@ int main(int argc, char *argv[])
    // 9. Initialize the slack variable ψₕ = ln(uₕ)
    LogarithmGridFunctionCoefficient ln_u(u_gf, obstacle);
    psi_gf.ProjectCoefficient(ln_u);
-   //  psi_gf = 0.0;
    psi_old_gf = psi_gf;
 
    char vishost[] = "localhost";
@@ -421,8 +419,6 @@ int main(int argc, char *argv[])
       err_sock << "parallel " << num_procs << " " << myid << "\n";
       err_sock << "solution\n" << pmesh << error_gf << "window_title 'Error'"  <<
                flush;
-
-      u_gf.ProjectCoefficient(obstacle);
 
       ParaViewDataCollection paraview_dc("JumpObstacle", &pmesh);
       paraview_dc.SetPrefixPath("ParaView");
