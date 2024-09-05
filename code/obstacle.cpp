@@ -1,4 +1,4 @@
-//                  Based on MFEM Example 36 - Parallel Version
+//                  Based on MFEM Example 36p - Parallel Version
 //
 //
 // Add file to mfem/examples and compile with: make obstacle
@@ -474,11 +474,12 @@ int main(int argc, char *argv[])
    }
 
    // END: Save data in the ParaView format
-   ParaViewDataCollection paraview_dc("ex34p", &pmesh);
+   ParaViewDataCollection paraview_dc("Obstacle", &pmesh);
    paraview_dc.SetPrefixPath("ParaView");
    paraview_dc.SetLevelsOfDetail(order);
    paraview_dc.SetDataFormat(VTKFormat::BINARY);
    paraview_dc.SetHighOrderOutput(true);
+   paraview_dc.SetLevelsOfDetail(curvature_order);
    paraview_dc.SetCycle(0);
    paraview_dc.SetTime(0.0);
    paraview_dc.RegisterField("u",&u_gf);
