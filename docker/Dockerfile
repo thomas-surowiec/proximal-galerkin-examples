@@ -14,7 +14,7 @@ RUN mamba upgrade -y mamba
 COPY environment.yml .
 
 # Update environment file with new environment name
-RUN mamba env update --file environment.yml --name dockerenv
-SHELL ["mamba", "run", "-n", "dockerenv", "/bin/bash", "-c"]
+RUN mamba env create --file environment.yml
+SHELL ["mamba", "run", "-n", "examples_for_the_proximal_galerkin_method", "/bin/bash", "-c"]
 
-RUN echo "source activate dockerenv" > ~/.bashrc
+RUN echo "source activate examples_for_the_proximal_galerkin_method" > ~/.bashrc
