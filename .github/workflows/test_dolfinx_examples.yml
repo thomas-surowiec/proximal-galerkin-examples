@@ -37,7 +37,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: example${{ matrix.example }}
+          name: example${{ matrix.example }}-${{ matrix.dolfinx_version }}
           path: ./output
           retention-days: 2
           if-no-files-found: error
