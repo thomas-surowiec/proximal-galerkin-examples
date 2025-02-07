@@ -7,34 +7,37 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
-
+  schedule:
+    - cron: "0 0 1 * *"
 env:
   DEB_PYTHON_INSTALL_LAYOUT: deb_system
 
 jobs: 
   test-example:
     runs-on: ubuntu-latest
-    container: ghcr.io/fenics/dolfinx/dolfinx:v0.6.0-r1
     strategy:
         matrix:
           example: [1, 2, 3]
+          dolfinx_version: ["v0.6.0-r1", "v0.7.3", "v0.8.0", "stable", "nightly"]
 
+    container: ghcr.io/fenics/dolfinx/dolfinx:${{ matrix.dolfinx_version }}
     steps:
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
   
       - name: Install dependencies
-        run:
-          python3 -m pip install -r requirements.txt
+        run: |
+          python3 -m pip install -U pip setuptools
+          python3 -m pip install -e .
 
       - name: Run example
         run:
           python3 code/obstacle.py -e ${{ matrix.example }} -p 1 -m 5
 
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
-          name: example${{ matrix.example }}
+          name: example${{ matrix.example }}-${{ matrix.dolfinx_version }}
           path: ./output
           retention-days: 2
           if-no-files-found: error

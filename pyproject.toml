@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64.4.0", "wheel", "pip>=22.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ProximalGalerkinExamples"
+version = "1.1.0"
+dependencies = [
+    "fenics-dolfinx","pandas"
+]
+
+[project.optional-dependencies]
+dev = ["pdbpp", "ipython", "jupytext", "ruff", "pre-commit"]
+
+[tool.setuptools]
+packages = []
+
+
+[tool.ruff.lint.isort]
+known-first-party = ["basix", "dolfinx", "ffcx", "ufl"]
+known-third-party = ["gmsh", "numpy", "pandas"]
+section-order = [
+    "future",
+    "standard-library",
+    "mpi",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.lint.isort.sections]
+"mpi" = ["mpi4py", "petsc4py"]

@@ -1,11 +1,14 @@
 """
-    FEniCSx code to reproduce obstacle problem results in [1].
+FEniCSx code to reproduce obstacle problem results in [1].
 
-    [1] Keith, B. and Surowiec, T. (2023) Proximal Galerkin: A structure-
-       preserving finite element method for pointwise bound constraints.
-       arXiv:2307.12444 [math.NA]
+[1] Keith, B. and Surowiec, T. (2023) Proximal Galerkin: A structure-
+   preserving finite element method for pointwise bound constraints.
+   arXiv:2307.12444 [math.NA]
 """
 
+from __future__ import annotations
+from packaging.version import Version
+import typing
 import argparse
 from math import pi
 from pathlib import Path
@@ -13,13 +16,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import ufl
-from dolfinx import fem, io, log, mesh
+from dolfinx import fem, io, log, mesh, __version__ as dolfinx_version
 from dolfinx.fem.petsc import NonlinearProblem
 from dolfinx.mesh import CellType, GhostMode
 from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
 from petsc4py.PETSc import ScalarType
-from ufl import conditional, div, dot, dx, exp, grad, gt, inner, lt, sin
+from ufl import conditional, dot, dx, exp, grad, gt, inner, lt, sin
+
+
+if typing.TYPE_CHECKING:
+    if Version(dolfinx_version) >= Version("0.7.0"):
+        from dolfinx.fem import Form as _FormType
+    else:
+        from dolfinx.fem import FormMetaClass as _FormType
 
 
 def rank_print(string: str, comm: MPI.Comm, rank: int = 0):
@@ -33,7 +43,7 @@ def rank_print(string: str, comm: MPI.Comm, rank: int = 0):
         print(string)
 
 
-def allreduce_scalar(form: fem.FormMetaClass, op: MPI.Op = MPI.SUM) -> np.floating:
+def allreduce_scalar(form: _FormType, op: MPI.Op = MPI.SUM) -> np.floating:
     """Assemble a scalar form over all processes and perform a global reduction
 
     :param form: Scalar form
@@ -97,11 +107,22 @@ def solve_problem(
     )
 
     # Define FE subspaces
-    P = ufl.FiniteElement("Lagrange", msh.ufl_cell(), polynomial_order)
-    B = ufl.FiniteElement("Bubble", msh.ufl_cell(), polynomial_order + 2)
-    Pm1 = ufl.FiniteElement("DG", msh.ufl_cell(), polynomial_order - 1)
-    mixed_element = ufl.MixedElement([P + B, Pm1])
-    V = fem.FunctionSpace(msh, mixed_element)
+    if Version(dolfinx_version) >= Version("0.8.0"):
+        import basix.ufl
+
+        P = basix.ufl.element("Lagrange", msh.basix_cell(), polynomial_order)
+        B = basix.ufl.element("Bubble", msh.basix_cell(), polynomial_order + 2)
+        Pm1 = basix.ufl.element("DG", msh.basix_cell(), polynomial_order - 1)
+        PB = basix.ufl.enriched_element([P, B])
+        mixed_element = basix.ufl.mixed_element([PB, Pm1])
+        V = fem.functionspace(msh, mixed_element)
+
+    else:
+        P = ufl.FiniteElement("Lagrange", msh.ufl_cell(), polynomial_order)
+        B = ufl.FiniteElement("Bubble", msh.ufl_cell(), polynomial_order + 2)
+        Pm1 = ufl.FiniteElement("DG", msh.ufl_cell(), polynomial_order - 1)
+        mixed_element = ufl.MixedElement([P + B, Pm1])
+        V = fem.FunctionSpace(msh, mixed_element)
 
     # Define functions and parameters
     alpha = fem.Constant(msh, ScalarType(1))
@@ -128,8 +149,7 @@ def solve_problem(
         f = (
             256
             * conditional(
-                lt(z_1, 0.25), -8 * z_2 * z_3 - 8 *
-                z_2 * z_4, fem.Constant(msh, 0.0)
+                lt(z_1, 0.25), -8 * z_2 * z_3 - 8 * z_2 * z_4, fem.Constant(msh, 0.0)
             )
             - lambda_exact
         )
@@ -141,12 +161,15 @@ def solve_problem(
     msh.topology.create_connectivity(msh.topology.dim - 1, msh.topology.dim)
     facets = mesh.exterior_facet_indices(msh.topology)
     V0, _ = V.sub(0).collapse()
-    dofs = fem.locate_dofs_topological(
-        (V.sub(0), V0), entity_dim=1, entities=facets)
+    dofs = fem.locate_dofs_topological((V.sub(0), V0), entity_dim=1, entities=facets)
 
     u_bc = fem.Function(V0)
-    u_bc.interpolate(fem.Expression(
-        u_exact, V.sub(0).element.interpolation_points()))
+    if Version(dolfinx_version) >= Version("0.10.0"):
+        int_points0 = V0.element.interpolation_points
+    else:
+        int_points0 = V0.element.interpolation_points()
+
+    u_bc.interpolate(fem.Expression(u_exact, int_points0))
     bcs = fem.dirichletbc(value=u_bc, dofs=dofs, V=V.sub(0))
 
     # Define solution variables
@@ -173,25 +196,21 @@ def solve_problem(
 
     # Setup newton solver
     log.set_log_level(log.LogLevel.WARNING)
-    newton_solver = NewtonSolver(
-        comm=msh.comm, problem=problem)
+    newton_solver = NewtonSolver(comm=msh.comm, problem=problem)
 
     # observables
     energy_form = fem.form(0.5 * inner(grad(u), grad(u)) * dx - f * u * dx)
     complementarity_form = fem.form((psi_k - psi) / alpha * u * dx)
-    feasibility_form = fem.form(conditional(
-        lt(u, 0), -u, fem.Constant(msh, 0.0)) * dx)
+    feasibility_form = fem.form(conditional(lt(u, 0), -u, fem.Constant(msh, 0.0)) * dx)
     dual_feasibility_form = fem.form(
-        conditional(lt(psi_k, psi), (psi - psi_k) /
-                    alpha, fem.Constant(msh, 0.0)) * dx
+        conditional(lt(psi_k, psi), (psi - psi_k) / alpha, fem.Constant(msh, 0.0)) * dx
     )
     H1increment_form = fem.form(
         inner(grad(u - u_k), grad(u - u_k)) * dx + (u - u_k) ** 2 * dx
     )
     L2increment_form = fem.form((exp(psi) - exp(psi_k)) ** 2 * dx)
     H1primal_error_form = fem.form(
-        inner(grad(u - u_exact), grad(u - u_exact)) *
-        dx + (u - u_exact) ** 2 * dx
+        inner(grad(u - u_exact), grad(u - u_exact)) * dx + (u - u_exact) ** 2 * dx
     )
     L2primal_error_form = fem.form((u - u_exact) ** 2 * dx)
     L2latent_error_form = fem.form((exp(psi) - u_exact) ** 2 * dx)
@@ -249,12 +268,16 @@ def solve_problem(
 
         tol_Newton = increment
 
-        rank_print(f"‖u - uₕ‖_H¹: {H1primal_error}" +
-                   f"  ‖u - ũₕ‖_L² : {L2latent_error}", msh.comm)
+        rank_print(
+            f"‖u - uₕ‖_H¹: {H1primal_error}" + f"  ‖u - ũₕ‖_L² : {L2latent_error}",
+            msh.comm,
+        )
 
         if increment_k > 0.0:
-            rank_print(f"Increment size: {increment}" +
-                       f"   Ratio: {increment / increment_k}", msh.comm)
+            rank_print(
+                f"Increment size: {increment}" + f"   Ratio: {increment / increment_k}",
+                msh.comm,
+            )
         else:
             rank_print(f"Increment size: {increment}", msh.comm)
         rank_print("", msh.comm)
@@ -311,10 +334,11 @@ def solve_problem(
     rank_print(df, msh.comm)
 
     # Create output space for bubble function
-    V_out = fem.FunctionSpace(
-        msh, ufl.FiniteElement(
-            "Lagrange", msh.ufl_cell(), polynomial_order + 2)
-    )
+    out_el = ("Lagrange", polynomial_order + 2)
+    if Version(dolfinx_version) >= Version("0.8.0"):
+        V_out = fem.functionspace(msh, out_el)
+    else:
+        V_out = fem.FunctionSpace(msh, out_el)
     u_out = fem.Function(V_out)
     u_out.interpolate(sol.sub(0).collapse())
 
@@ -324,41 +348,60 @@ def solve_problem(
         vtx.write(0.0)
 
     # Export interpolant of exact solution u
-    V_alt = fem.FunctionSpace(msh, ("Lagrange", polynomial_order))
+    el_alt = ("Lagrange", polynomial_order)
+    if Version(dolfinx_version) >= Version("0.8.0"):
+        V_alt = fem.functionspace(msh, el_alt)
+    else:
+        V_alt = fem.FunctionSpace(msh, el_alt)
     q = fem.Function(V_alt)
-    expr = fem.Expression(u_exact, V_alt.element.interpolation_points())
+    if Version(dolfinx_version) >= Version("0.10.0"):
+        alt_int_points = V_alt.element.interpolation_points
+    else:
+        alt_int_points = V_alt.element.interpolation_points()
+
+    expr = fem.Expression(u_exact, alt_int_points)
     q.interpolate(expr)
     with io.VTXWriter(msh.comm, output_dir / "u_exact.bp", [q]) as vtx:
         vtx.write(0.0)
 
     # Export interpolant of Lagrange multiplier λ
-    W_out = fem.FunctionSpace(msh, ("DG", max(1, polynomial_order - 1)))
+    el_lmbd = ("DG", max(1, polynomial_order - 1))
+    if Version(dolfinx_version) >= Version("0.8.0"):
+        W_out = fem.functionspace(msh, el_lmbd)
+    else:
+        W_out = fem.FunctionSpace(msh, el_lmbd)
+    if Version(dolfinx_version) >= Version("0.10.0"):
+        out_int_points = W_out.element.interpolation_points
+    else:
+        out_int_points = W_out.element.interpolation_points()
+
     q = fem.Function(W_out)
-    expr = fem.Expression(lambda_exact, W_out.element.interpolation_points())
+    expr = fem.Expression(lambda_exact, out_int_points)
     q.interpolate(expr)
     with io.VTXWriter(msh.comm, output_dir / "lambda_exact.bp", [q]) as vtx:
         vtx.write(0.0)
 
     # Export latent solution variable
     q = fem.Function(W_out)
-    expr = fem.Expression(sol.sub(1), W_out.element.interpolation_points())
+    expr = fem.Expression(sol.sub(1), out_int_points)
     q.interpolate(expr)
     with io.VTXWriter(msh.comm, output_dir / "psi.bp", [q]) as vtx:
         vtx.write(0.0)
 
     # Export feasible discrete solution
     exp_psi = exp(sol.sub(1))
-    expr = fem.Expression(exp_psi, W_out.element.interpolation_points())
+    expr = fem.Expression(exp_psi, out_int_points)
     q.interpolate(expr)
     with io.VTXWriter(msh.comm, output_dir / "tilde_u.bp", [q]) as vtx:
         vtx.write(0.0)
 
     # Export "Lagrange multiplier"
     lam = (sol_k.sub(1) - sol.sub(1)) / alpha.value
-    expr = fem.Expression(lam, W_out.element.interpolation_points())
+    expr = fem.Expression(lam, out_int_points)
     q.interpolate(expr)
     with io.VTXWriter(msh.comm, output_dir / "lambda.bp", [q]) as vtx:
         vtx.write(0.0)
+
 
 # -------------------------------------------------------
 if __name__ == "__main__":
