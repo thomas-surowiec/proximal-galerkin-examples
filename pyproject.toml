@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ProximalGalerkinExamples"
 version = "1.2.0"
 dependencies = [
-    "fenics-dolfinx","pandas"
+    "fenics-dolfinx","pandas", "packaging"
 ]
 
 [project.optional-dependencies]

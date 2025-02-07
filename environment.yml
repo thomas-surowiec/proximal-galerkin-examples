@@ -1,4 +1,4 @@
-name: "examples_for_the_proximal_galerkin_method"
+name: proximalGalerkin
 channels:
   - conda-forge
 dependencies:
@@ -6,3 +6,4 @@ dependencies:
   - mfem
   - python=3.10
   - pandas
+  - packaging

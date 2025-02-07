@@ -15,6 +15,6 @@ COPY environment.yml .
 
 # Update environment file with new environment name
 RUN mamba env create --file environment.yml
-SHELL ["mamba", "run", "-n", "examples_for_the_proximal_galerkin_method", "/bin/bash", "-c"]
+SHELL ["mamba", "run", "-n", "proximalGalerkin", "/bin/bash", "-c"]
 
-RUN echo "source activate examples_for_the_proximal_galerkin_method" > ~/.bashrc
+RUN echo "source activate proximalGalerkin" > ~/.bashrc
