@@ -149,7 +149,8 @@ def solve_problem(
         f = (
             256
             * conditional(
-                lt(z_1, 0.25), -8 * z_2 * z_3 - 8 * z_2 * z_4, fem.Constant(msh, 0.0)
+                lt(z_1, 0.25), -8 * z_2 * z_3 - 8 *
+                z_2 * z_4, fem.Constant(msh, 0.0)
             )
             - lambda_exact
         )
@@ -161,7 +162,8 @@ def solve_problem(
     msh.topology.create_connectivity(msh.topology.dim - 1, msh.topology.dim)
     facets = mesh.exterior_facet_indices(msh.topology)
     V0, _ = V.sub(0).collapse()
-    dofs = fem.locate_dofs_topological((V.sub(0), V0), entity_dim=1, entities=facets)
+    dofs = fem.locate_dofs_topological(
+        (V.sub(0), V0), entity_dim=1, entities=facets)
 
     u_bc = fem.Function(V0)
     if Version(dolfinx_version) >= Version("0.10.0"):
@@ -191,26 +193,35 @@ def solve_problem(
     )
     J = ufl.derivative(F, sol)
 
-    # Setup non-linear problem
-    problem = NonlinearProblem(F, sol, bcs=[bcs], J=J)
+    try:
+        # Setup non-linear problem (old API)
+        problem = NonlinearProblem(F, sol, bcs=[bcs], J=J)
+        log.set_log_level(log.LogLevel.WARNING)
+        newton_solver = NewtonSolver(comm=msh.comm, problem=problem)
 
-    # Setup newton solver
-    log.set_log_level(log.LogLevel.WARNING)
-    newton_solver = NewtonSolver(comm=msh.comm, problem=problem)
+    except TypeError:
+        # Setup non-linear problem (new API)
+        petsc_options = {"snes_type": "newtonls", "ksp_type": "preonly",
+                         "pc_type": "lu", "snes_linesearch_type": "none"}
+        newton_solver = NonlinearProblem(
+            F, sol, bcs=[bcs], J=J, petsc_options=petsc_options, petsc_options_prefix="nls_")
 
     # observables
     energy_form = fem.form(0.5 * inner(grad(u), grad(u)) * dx - f * u * dx)
     complementarity_form = fem.form((psi_k - psi) / alpha * u * dx)
-    feasibility_form = fem.form(conditional(lt(u, 0), -u, fem.Constant(msh, 0.0)) * dx)
+    feasibility_form = fem.form(conditional(
+        lt(u, 0), -u, fem.Constant(msh, 0.0)) * dx)
     dual_feasibility_form = fem.form(
-        conditional(lt(psi_k, psi), (psi - psi_k) / alpha, fem.Constant(msh, 0.0)) * dx
+        conditional(lt(psi_k, psi), (psi - psi_k) /
+                    alpha, fem.Constant(msh, 0.0)) * dx
     )
     H1increment_form = fem.form(
         inner(grad(u - u_k), grad(u - u_k)) * dx + (u - u_k) ** 2 * dx
     )
     L2increment_form = fem.form((exp(psi) - exp(psi_k)) ** 2 * dx)
     H1primal_error_form = fem.form(
-        inner(grad(u - u_exact), grad(u - u_exact)) * dx + (u - u_exact) ** 2 * dx
+        inner(grad(u - u_exact), grad(u - u_exact)) *
+        dx + (u - u_exact) ** 2 * dx
     )
     L2primal_error_form = fem.form((u - u_exact) ** 2 * dx)
     L2latent_error_form = fem.form((exp(psi) - u_exact) ** 2 * dx)
@@ -251,7 +262,12 @@ def solve_problem(
         rank_print(f"OUTER LOOP {k + 1} alpha: {alpha.value}", msh.comm)
 
         # Solve problem
-        (n, converged) = newton_solver.solve(sol)
+        try:
+            (n, converged) = newton_solver.solve(sol)
+        except TypeError:
+            newton_solver.solve()
+            converged = newton_solver.solver.getConvergedReason()
+            n = newton_solver.solver.getIterationNumber()
         rank_print(f"Newton steps: {n}   Converged: {converged}", msh.comm)
 
         # Check outer loop convergence
@@ -269,13 +285,15 @@ def solve_problem(
         tol_Newton = increment
 
         rank_print(
-            f"‖u - uₕ‖_H¹: {H1primal_error}" + f"  ‖u - ũₕ‖_L² : {L2latent_error}",
+            f"‖u - uₕ‖_H¹: {H1primal_error}" +
+            f"  ‖u - ũₕ‖_L² : {L2latent_error}",
             msh.comm,
         )
 
         if increment_k > 0.0:
             rank_print(
-                f"Increment size: {increment}" + f"   Ratio: {increment / increment_k}",
+                f"Increment size: {increment}" +
+                f"   Ratio: {increment / increment_k}",
                 msh.comm,
             )
         else:
@@ -299,9 +317,12 @@ def solve_problem(
             break
 
         # Reset Newton solver options
-        newton_solver.atol = 1e-3
-        newton_solver.rtol = tol_Newton * 1e-4
-
+        if hasattr(newton_solver, "atol"):
+            newton_solver.atol = 1e-3
+            newton_solver.rtol = tol_Newton * 1e-4
+        else:
+            newton_solver.solver.setTolerances(
+                atol=1e-3, rtol=tol_Newton * 1e-4)
         # Update sol_k with sol_new
         sol_k.x.array[:] = sol.x.array[:]
         increment_k = increment

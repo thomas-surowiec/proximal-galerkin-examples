@@ -130,10 +130,19 @@ def BG_solve(
     L = f * v * dx
 
     # Set-up linear problem
-    problem = fem.petsc.LinearProblem(
-        a, L, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"}
-    )
-
+    try:
+        problem = fem.petsc.LinearProblem(
+            a, L, bcs=[bc], petsc_options={
+                "ksp_type": "preonly", "pc_type": "lu"}
+        )
+    except TypeError:
+        problem = fem.petsc.LinearProblem(
+            a,
+            L,
+            bcs=[bc],
+            petsc_options={"ksp_type": "preonly", "pc_type": "lu"},
+            petsc_options_prefix="BG_",
+        )
     # Solve linear problem
     uh = problem.solve()
 
@@ -204,8 +213,10 @@ def PG_solve(
     facets = mesh.exterior_facet_indices(msh.topology)
     V0, _ = V.sub(0).collapse()
     V1, _ = V.sub(1).collapse()
-    dofs_0 = fem.locate_dofs_topological((V.sub(0), V0), entity_dim=1, entities=facets)
-    dofs_1 = fem.locate_dofs_topological((V.sub(1), V1), entity_dim=1, entities=facets)
+    dofs_0 = fem.locate_dofs_topological(
+        (V.sub(0), V0), entity_dim=1, entities=facets)
+    dofs_1 = fem.locate_dofs_topological(
+        (V.sub(1), V1), entity_dim=1, entities=facets)
 
     u_bc = fem.Function(V0)
     if Version(dolfinx_version) >= Version("0.10.0"):
@@ -239,7 +250,8 @@ def PG_solve(
         print("\nUsing GLL quadrature")
         dx_GLL = ufl.Measure(
             "dx",
-            metadata={"quadrature_rule": "GLL", "quadrature_degree": polynomial_order},
+            metadata={"quadrature_rule": "GLL",
+                      "quadrature_degree": polynomial_order},
         )
     else:
         dx_GLL = dx
@@ -257,11 +269,19 @@ def PG_solve(
     J = ufl.derivative(F, sol)
 
     # Setup non-linear problem
-    problem = NonlinearProblem(F, sol, bcs=[bc_0, bc_1], J=J)
+    bcs = [bc_0, bc_1]
+    try:
+        # Setup non-linear problem (old API)
+        problem = NonlinearProblem(F, sol, bcs=bcs, J=J)
+        log.set_log_level(log.LogLevel.WARNING)
+        newton_solver = NewtonSolver(comm=msh.comm, problem=problem)
 
-    # Setup Newton solver
-    log.set_log_level(log.LogLevel.WARNING)
-    newton_solver = NewtonSolver(comm=msh.comm, problem=problem)
+    except TypeError:
+        # Setup non-linear problem (new API)
+        petsc_options = {"snes_type": "newtonls", "ksp_type": "preonly",
+                         "pc_type": "lu", "snes_linesearch_type": "none"}
+        newton_solver = NonlinearProblem(
+            F, sol, bcs=bcs, J=J, petsc_options=petsc_options, petsc_options_prefix="nls_")
 
     # Observables
     L2primal_increment_form = fem.form((u - u_k) ** 2 * dx)
@@ -273,7 +293,8 @@ def PG_solve(
         + (u - u_exact) ** 2 * dx
     )
     L2primal_error_form = fem.form((u - u_exact) ** 2 * dx)
-    L2latent_error_form = fem.form(((tanh(psi / 2) + 1) / 2 - u_exact) ** 2 * dx)
+    L2latent_error_form = fem.form(
+        ((tanh(psi / 2) + 1) / 2 - u_exact) ** 2 * dx)
 
     # Initial guess from FEM solution
     uh = BG_solve(msh, polynomial_order, epsilon)
@@ -298,7 +319,12 @@ def PG_solve(
         rank_print(f"OUTER LOOP {k + 1} alpha: {alpha.value}", msh.comm)
 
         # Solve problem
-        (n, converged) = newton_solver.solve(sol)
+        try:
+            (n, converged) = newton_solver.solve(sol)
+        except TypeError:
+            newton_solver.solve()
+            converged = newton_solver.solver.getConvergedReason()
+            n = newton_solver.solver.getIterationNumber()
         rank_print(f"Newton steps: {n}   Converged: {converged}", msh.comm)
 
         # Check outer loop convergence
@@ -311,7 +337,8 @@ def PG_solve(
         tol_Newton = primal_increment
 
         rank_print(
-            f"‖u - uₕ‖_H¹: {H1primal_error}" + f"  ‖u - ũₕ‖_L² : {L2latent_error}",
+            f"‖u - uₕ‖_H¹: {H1primal_error}" +
+            f"  ‖u - ũₕ‖_L² : {L2latent_error}",
             msh.comm,
         )
 
@@ -337,8 +364,12 @@ def PG_solve(
             break
 
         # Reset Newton solver options
-        newton_solver.atol = 1e-6
-        newton_solver.rtol = tol_Newton * 1e-5
+        if hasattr(newton_solver, "atol"):
+            newton_solver.atol = 1e-6
+            newton_solver.rtol = tol_Newton * 1e-5
+        else:
+            newton_solver.solver.setTolerances(
+                atol=1e-6, rtol=tol_Newton * 1e-5)
 
         # Update sol_k with sol_new
         sol_k.x.array[:] = sol.x.array[:]

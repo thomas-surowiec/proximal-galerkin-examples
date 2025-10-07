@@ -23,7 +23,7 @@ jobs:
     container: ghcr.io/fenics/dolfinx/dolfinx:${{ matrix.dolfinx_version }}
     steps:
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
   
       - name: Install dependencies
         run: |
@@ -31,9 +31,9 @@ jobs:
           python3 -m pip install -e .
 
       - name: Run example
-        run:
+        run: |
           python3 code/obstacle.py -e ${{ matrix.example }} -p 1 -m 5
-
+          python3 code/advection_diffusion.py
 
       - uses: actions/upload-artifact@v4
         with:
