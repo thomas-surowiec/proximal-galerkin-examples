@@ -4,6 +4,6 @@ channels:
 dependencies:
   - fenics-dolfinx
   - mfem
-  - python=3.10
+  - python
   - pandas
   - packaging
