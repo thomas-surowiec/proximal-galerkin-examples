@@ -27,7 +27,7 @@ jobs:
   
       - name: Install dependencies
         run: |
-          python3 -m pip install -U pip setuptools
+          python3 -m pip install -U pip "setuptools<82"
           python3 -m pip install -e .
 
       - name: Run example
