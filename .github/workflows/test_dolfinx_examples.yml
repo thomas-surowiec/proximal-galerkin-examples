@@ -23,7 +23,7 @@ jobs:
     container: ghcr.io/fenics/dolfinx/dolfinx:${{ matrix.dolfinx_version }}
     steps:
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
   
       - name: Install dependencies
         run: |
